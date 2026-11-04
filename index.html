@@ -805,7 +805,7 @@ input.input[type="date"],input.input[type="time"]{display:block;width:100%;min-w
 .wd-state svg{width:15px;height:15px}
 .wd-state.ok{background:rgba(18,184,134,.28);border-color:rgba(130,255,200,.55)}
 .wd-mini{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:20px}
-@media(min-width:640px){.wd-mini{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(min-width:640px){.wd-mini{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .wd-mt{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.24);border-radius:16px;padding:13px 14px;min-width:0}
 .wd-mt .k{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;opacity:.85}
 .wd-mt .k svg{width:14px;height:14px}
@@ -997,6 +997,8 @@ textarea.input{resize:vertical;min-height:70px;font-family:inherit}
 .wd-cta-txt{flex:1 1 220px;min-width:0}
 .wd-cta-txt h4{font-size:15px}
 .wd-cta-txt p{font-size:13px;color:var(--gray);margin-top:2px}
+.feature-row .feature-item:last-child:nth-child(odd){grid-column:1/-1}
+.gc-art .gc-badge svg{width:13px;height:13px;flex:none;filter:none}
 </style>
 </head>
 <body>
@@ -1011,7 +1013,7 @@ textarea.input{resize:vertical;min-height:70px;font-family:inherit}
    Architecture :
    1. CONFIG          — constantes applicatives (barèmes, caps…)
    2. STORE           — couche de données (tables identiques à Supabase)
-   3. SERVICES        — Auth, Wallet, Games, Ads, Referral, Creator…
+   3. SERVICES        — Auth, Wallet, Games, Referral, Creator…
    4. UI KIT          — toasts, modales, compteurs animés
    5. SHELL & ROUTEUR — navigation SPA sans rechargement
    6. VUES            — les 6 pages + auth + notifications
@@ -1061,7 +1063,7 @@ textarea.input{resize:vertical;min-height:70px;font-family:inherit}
    -- RLS : AUCUN droit d'écriture direct pour le client sur wallets / withdrawal_requests / unlock_payments.
    -- Le client n'appelle que des fonctions SECURITY DEFINER :
    --   request_withdrawal(amount)  : vérifie retraits activés, frais de déblocage payés, objectifs validés, solde,
-   --                                 minimum (1er retrait 1000 / suivants 8000), maximum 10000 ; débite le portefeuille
+   --                                 minimum (1er retrait 1000 / suivants 8000) ; débite le portefeuille
    --                                 et insère la demande dans UNE seule transaction.
    --   submit_unlock_payment(...)  : insère un paiement 'en attente' (tx_ref unique).
    --   admin_review_withdrawal / admin_review_unlock : réservées au rôle admin ; un refus recrédite le solde.
@@ -1072,8 +1074,6 @@ textarea.input{resize:vertical;min-height:70px;font-family:inherit}
    create table public.creator_rewards(id uuid pk default gen_random_uuid(),
      submission_id uuid references creator_submissions, amount bigint,
      status text, created_at timestamptz default now());
-   create table public.ad_views(id uuid pk default gen_random_uuid(),
-     user_id uuid, provider text, reward int, status text, created_at timestamptz default now());
    create table public.notifications(id uuid pk default gen_random_uuid(),
      user_id uuid, title text, body text, category text, read bool default false,
      created_at timestamptz default now());
@@ -1091,7 +1091,7 @@ textarea.input{resize:vertical;min-height:70px;font-family:inherit}
 
 /* ================= 1. CONFIG ================= */
 const CONFIG = {
-  AD_REWARD: 25, AD_DAILY_CAP: 10, AD_DURATION: 15, AD_PROVIDER: null, REFERRAL_ACTIVE_DAYS: 7,
+  REFERRAL_ACTIVE_DAYS: 7,
   GAME_DAILY_CAP: 300, CHALLENGE_REWARD: 50,
   ADMIN_EMAILS: ['admin@monelyx.app'],
   WITHDRAW: { methods:[
@@ -1103,7 +1103,7 @@ const CONFIG = {
   NEWS: [
     {d:'31 oct. 2026', t:'Creator est disponible', m:'Soumets tes vidéos TikTok et YouTube et suis leur vérification.', icon:'clapperboard'},
     {d:'28 oct. 2026', t:'Nouveau jeu : Empire Puzzle', m:'Un taquin de réflexion pour muscler ta logique.', icon:'puzzle'},
-    {d:'24 oct. 2026', t:'Défis quotidiens', m:'Chaque jour, 4 défis à relever pour bonus de crédits.', icon:'sparkles'} ]
+    {d:'24 oct. 2026', t:'Défis quotidiens', m:'Chaque jour, 3 défis à relever pour bonus de crédits.', icon:'sparkles'} ]
 };
 const PUBLIC_PAGES = ['welcome','signup','login','forgot'];
 /* Couvertures des jeux (indexées par id : fonctionne aussi avec les données déjà enregistrées) */
@@ -1132,7 +1132,7 @@ const Store = {
     const now=new Date().toISOString();
     const db={ meta:{version:1, createdAt:now, backend:'adaptateur local — Supabase à connecter'},
       users:[], wallets:[], wallet_transactions:[], game_sessions:[], referrals:[], referral_progress:[], referral_relations:[], withdrawal_requests:[], unlock_payments:[], withdraw_objectives:[], app_settings:{},
-      creator_submissions:[], creator_rewards:[], ad_views:[], notifications:[], support_requests:[],
+      creator_submissions:[], creator_rewards:[], notifications:[], support_requests:[],
       user_settings:[], security_logs:[],
       games:[
         {id:'runner', name:'EMPIRE RUNNER', tagline:"Jeu d'adresse et de réflexes", desc:"Cours à travers l'Empire, saute les obstacles et va le plus loin possible.", cat:'Adresse', icon:'zap', pop:true, c:['#1769FF','#00B8FF']},
@@ -1377,13 +1377,6 @@ const Games={
     return {score,credits:grant,capped:grant<credits};
   }
 };
-const Ads={
-  today(userId){ return Store.read().ad_views.filter(a=>a.userId===userId&&isToday(a.date)); },
-  pendingToday(userId){ return this.today(userId).reduce((s,a)=>s+a.reward,0); },
-  record(userId){ Store.mutate(db=>db.ad_views.unshift({id:uid(),userId,provider:CONFIG.AD_PROVIDER,reward:CONFIG.AD_REWARD,status:'en attente confirmation fournisseur',date:new Date().toISOString()}));
-    Wallet.credit(userId,CONFIG.AD_REWARD,{type:'pub',status:'en attente',label:'Publicité récompensée (confirmation fournisseur requise)'});
-    Notif.add(userId,{title:'Publicité terminée',msg:'Ta récompense de '+CONFIG.AD_REWARD+' crédits est en attente de confirmation du fournisseur.',cat:'publicite'}); }
-};
 /* ---------- Appareil (détection des comptes multiples) ---------- */
 const Device={ key:'monempire.device',
   id(){ let d=null; try{ d=localStorage.getItem(this.key); }catch(e){}
@@ -1454,7 +1447,6 @@ const Referral={
   /* Filleuls et statut Actif / Inactif */
   lastActivity(userId){ const db=Store.read(); const ts=[];
     db.game_sessions.forEach(x=>{ if(x.userId===userId) ts.push(x.date); });
-    db.ad_views.forEach(x=>{ if(x.userId===userId) ts.push(x.date); });
     db.wallet_transactions.forEach(x=>{ if(x.userId===userId&&x.type!=='parrainage') ts.push(x.date); });
     db.creator_submissions.forEach(x=>{ if(x.userId===userId) ts.push(x.createdAt); });
     db.security_logs.forEach(x=>{ if(x.userId===userId&&x.event==='connexion') ts.push(x.date); });
@@ -1476,8 +1468,7 @@ const Referral={
       {t:'Adresse e-mail vérifiée', ok:!!u.emailVerified},
       {t:'Numéro de téléphone renseigné', ok:!!u.phone},
       {t:'Photo de profil ajoutée', ok:!!u.avatar},
-      {t:'Première partie jouée', ok:db.game_sessions.some(s=>s.userId===userId)},
-      {t:'Première publicité visionnée', ok:db.ad_views.some(a=>a.userId===userId)} ]; }
+      {t:'Première partie jouée', ok:db.game_sessions.some(s=>s.userId===userId)} ]; }
 };
 const Creator={
   list(userId){ return Store.read().creator_submissions.filter(c=>c.userId===userId); },
@@ -1498,7 +1489,6 @@ const Notif={
 };
 const CHALLENGES=[
   {id:'play', icon:'gamepad-2', t:'Jouer une partie', s:'Termine au moins une partie aujourd\u2019hui', get:u=>Store.read().game_sessions.filter(x=>x.userId===u&&isToday(x.date)).length},
-  {id:'ad', icon:'tv', t:'Regarder une publicité', s:'Termine une publicité récompensée', get:u=>Ads.today(u).length},
   {id:'score', icon:'trophy', t:'Dépasser 300 points', s:'Marque plus de 300 points sur une partie', get:u=>Store.read().game_sessions.filter(x=>x.userId===u&&isToday(x.date)&&x.score>300).length},
   {id:'creator', icon:'clapperboard', t:'Proposer une vidéo', s:'Soumets une vidéo dans Creator', get:u=>Creator.list(u).filter(x=>isToday(x.createdAt)).length} ];
 function challengeClaimed(u,id){ return Store.read().wallet_transactions.some(t=>t.userId===u&&t.type==='defi'&&t.meta&&t.meta.challengeId===id&&isToday(t.date)); }
@@ -1592,10 +1582,9 @@ function renderAuth(page){ const R={welcome:authWelcome,signup:authSignup,login:
   if(page==='signup') genCaptcha(); }
 function authWelcome(){ return '<div class="auth-brand"><div class="tb-logo floaty">'+logoImg()+'</div><h1>MONELYX</h1></div>'
   +'<div class="welcome-hero"><h2>Construis <span>ton Empire</span></h2>'
-  +'<p>Joue à des mini-jeux, regarde des publicités récompensées, invite tes amis et transforme tes performances en récompenses numériques.</p></div>'
+  +'<p>Joue à des mini-jeux, invite tes amis et transforme tes performances en récompenses numériques.</p></div>'
   +'<div class="feature-row">'
   +'<div class="feature-item">'+ic('gamepad-2')+'Mini-jeux sans mise</div>'
-  +'<div class="feature-item">'+ic('tv')+'Publicités récompensées</div>'
   +'<div class="feature-item">'+ic('users')+'Parrainage clair</div>'
   +'<div class="feature-item">'+ic('clapperboard')+'Espace Creator</div></div>'
   +'<div style="display:flex;flex-direction:column;gap:10px"><button class="btn btn-primary btn-lg btn-block" onclick="go(\'signup\')">'+ic('sparkles')+'Créer un compte</button>'
@@ -1712,7 +1701,6 @@ render(u){ const w=Wallet.get(u.id); const lvl=levelOf(w.totalEarned); const hid
   let mine=rows.findIndex(r=>r.me); if(mine===-1){ rows.push({id:u.id,me:true,name:'Toi',total:w.totalEarned}); rows.sort((a,b)=>b.total-a.total); mine=rows.findIndex(r=>r.me); }
   const top=rows.slice(0,7); if(mine>=7) top.push(rows[mine]);
   const notifs=Notif.list(u.id).slice(0,2);
-  const todayAds=Ads.today(u.id).length;
   return '<div class="hero"><div><h1>Bienvenue dans ton Empire, <span>'+esc(u.prenom)+' !</span></h1>'
   +'<p>'+ic('calendar')+new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+'</p></div>'
   +'<div class="lvl-chip">'+ic('award')+'Niveau '+lvl.name+'</div></div>'
@@ -1727,15 +1715,10 @@ render(u){ const w=Wallet.get(u.id); const lvl=levelOf(w.totalEarned); const hid
   +'<div class="bc-cta"><button class="btn btn-white btn-lg" onclick="go(\'wallet\')">'+ic('wallet')+'Voir mon portefeuille</button></div></div>'
   +'<div class="sec-head"><h2>'+ic('gamepad-2')+'Découvrez nos jeux</h2><button class="link" onclick="go(\'games\')">Tout voir '+ic('chevron-right')+'</button></div>'
   +'<div class="games-grid">'+db.games.map(g=>gameCardHTML(g)).join('')+'</div>'
-  +'<div class="sec-head"><h2>'+ic('tv')+'Publicités récompensées</h2></div>'
-  +'<div class="ad-card"><div class="ad-ico floaty">'+ic('tv')+'</div><div style="flex:1;min-width:min(240px,100%)"><h3>REGARDE DES PUBLICITÉS</h3>'
-  +'<p>Découvre des publicités récompensées et participe aux programmes de récompenses disponibles.</p>'
-  +'<div class="ad-stats"><span>'+todayAds+' / '+CONFIG.AD_DAILY_CAP+' aujourd\u2019hui</span><span>'+fmt(Ads.pendingToday(u.id))+' crédits en attente</span><span>'+fmt(db.ad_views.filter(a=>a.userId===u.id).length)+' complétées au total</span></div></div>'
-  +'<button class="btn btn-white btn-lg" onclick="openAds()">'+ic('play')+'REGARDER UNE PUBLICITÉ</button></div>'
   +'<div class="sec-head"><h2>'+ic('list-checks')+'Défis du jour</h2></div><div class="card" style="padding:8px 20px">'+challengeRowsHTML(u)+'</div>'
   +'<div class="grid-2" style="margin-top:16px"><div>'
   +'<div class="sec-head" style="margin-top:0"><h2>'+ic('history')+'Activités récentes</h2><button class="link" onclick="go(\'wallet\')">Historique '+ic('chevron-right')+'</button></div>'
-  +'<div class="card" style="padding:8px 20px">'+(txs.length?txs.map(activityRow).join(''):emptyState('inbox','Aucune activité','Joue une partie ou regarde une publicité pour démarrer ton Empire.'))+'</div></div><div>'
+  +'<div class="card" style="padding:8px 20px">'+(txs.length?txs.map(activityRow).join(''):emptyState('inbox','Aucune activité','Joue une partie pour démarrer ton Empire.'))+'</div></div><div>'
   +'<div class="sec-head" style="margin-top:0"><h2>'+ic('trending-up')+'Progression personnelle</h2></div><div class="card">'
   +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span class="lvl-chip">'+ic('award')+lvl.name+'</span><span style="font-size:12px;color:var(--gray);font-weight:700">'+fmt(lvl.total)+' crédits gagnés</span></div>'
   +'<div class="progress"><i style="width:'+lvl.pct+'%"></i></div>'
@@ -1764,38 +1747,6 @@ function challengeRowsHTML(u){ return CHALLENGES.map(c=>{ const p=c.get(u.id), d
   +'<div class="ch-main"><div class="t">'+c.t+'</div><div class="s">'+c.s+'</div></div>'
   +(claimed?'<span class="badge b-green">'+ic('check')+'Réclamé</span>':done?'<button class="btn btn-primary btn-sm" onclick="claimChallenge(\''+c.id+'\')">'+ic('gift')+'+'+CONFIG.CHALLENGE_REWARD+'</button>':'<span class="badge b-gray">0 / 1</span>')+'</div>'; }).join(''); }
 function toggleHide(){ localStorage.setItem('me_hide',localStorage.getItem('me_hide')==='1'?'0':'1'); render(); }
-
-/* ---------- Publicités ---------- */
-let _adTimer=null,_adLeft=0;
-function openAds(){ const u=Auth.currentUser(); const n=Ads.today(u.id).length; const canWatch=n<CONFIG.AD_DAILY_CAP;
-  openModal({title:'Publicités récompensées',
-    body:'<div class="info-strip" style="margin-bottom:14px">'+ic('info')+'<span>Fournisseur de publicités récompensées : <b>'+(CONFIG.AD_PROVIDER?'connecté':'non connecté (intégration prévue)')+'</b>. Chaque récompense reste <b>en attente</b> jusqu\u2019à la confirmation du fournisseur.</span></div>'
-    +'<div class="kv"><span class="k">Complétées aujourd\u2019hui</span><span class="v">'+n+' / '+CONFIG.AD_DAILY_CAP+'</span></div>'
-    +'<div class="kv"><span class="k">Récompense par publicité</span><span class="v">'+CONFIG.AD_REWARD+' crédits (en attente)</span></div>'
-    +'<div class="kv"><span class="k">Total complétées</span><span class="v">'+fmt(Store.read().ad_views.filter(a=>a.userId===u.id).length)+'</span></div>'
-    +'<div class="kv"><span class="k">Historique</span><span class="v"><button class="btn btn-ghost btn-sm" onclick="closeModal();go(\'wallet\')">'+ic('history')+'Voir</button></span></div>',
-    actions:'<button class="btn btn-outline" onclick="closeModal()">Fermer</button>'
-      +(canWatch?'<button class="btn btn-primary" onclick="startAd()">'+ic('play')+'Lancer la publicité</button>':'<button class="btn btn-primary" disabled>'+ic('check')+'Limite du jour atteinte</button>')}); }
-function startAd(){ closeModal(); _adLeft=CONFIG.AD_DURATION;
-  openModal({title:'Lecture en cours', dismissable:true, onClose:()=>{ if(_adTimer){ clearInterval(_adTimer); _adTimer=null; if(_adLeft>0) toast('Publicité non terminée : aucune récompense.','warn','alert-circle'); } },
-    body:'<div style="border-radius:18px;background:linear-gradient(135deg,#10264B,#1B3C7A);color:#fff;padding:34px 20px;text-align:center;position:relative;overflow:hidden">'
-    +'<div style="position:absolute;width:160px;height:160px;border-radius:50%;background:rgba(0,184,255,.18);top:-60px;right:-40px"></div>'
-    +'<div style="width:64px;height:64px;border-radius:20px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;margin:0 auto 14px">'+ic('tv')+'</div>'
-    +'<div style="font-family:Manrope;font-weight:800;letter-spacing:1px">MONELYX ADS</div>'
-    +'<p style="font-size:12.5px;opacity:.8;margin-top:6px">Emplacement publicitaire réservé au fournisseur récompensé.</p>'
-    +'<div style="margin-top:18px;height:9px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden"><div id="adBar" style="height:100%;width:0%;background:linear-gradient(90deg,#00B8FF,#7FDFFF);transition:width 1s linear"></div></div>'
-    +'<div style="margin-top:10px;font-family:Manrope;font-weight:800;font-size:22px" id="adCount">'+_adLeft+' s</div></div>'});
-  _adTimer=setInterval(()=>{ _adLeft--; const bar=$('#adBar'), cnt=$('#adCount');
-    if(bar) bar.style.width=Math.round((CONFIG.AD_DURATION-_adLeft)/CONFIG.AD_DURATION*100)+'%';
-    if(cnt) cnt.textContent=_adLeft+' s';
-    if(_adLeft<=0){ clearInterval(_adTimer); _adTimer=null; const saved=window._mClose; window._mClose=null; closeModal(); if(saved){} finishAd(); } },1000); }
-function finishAd(){ const u=Auth.currentUser(); Ads.record(u.id);
-  openModal({title:'Publicité terminée',
-    body:'<div style="text-align:center"><div class="go-ico" style="background:linear-gradient(135deg,#0B9A57,#3DDC97)">'+ic('check')+'</div>'
-    +'<h3 style="margin-bottom:6px">Merci !</h3><p style="color:var(--gray);font-size:13.5px">La fin de la publicité est confirmée côté application. La récompense de <b>'+CONFIG.AD_REWARD+' crédits</b> est ajoutée à ton solde <b>en attente</b>, jusqu\u2019à la confirmation du fournisseur publicitaire.</p>'
-    +'<div style="margin-top:12px">'+badgeStatus('en attente')+'</div></div>',
-    actions:'<button class="btn btn-outline" onclick="closeModal();go(\'wallet\')">'+ic('wallet')+'Portefeuille</button><button class="btn btn-primary" onclick="closeModal();render()">Continuer</button>'});
-  render(); }
 
 /* ---------- PAGE 02 : JEUX ---------- */
 VIEWS.games={active:'games',
@@ -1930,7 +1881,7 @@ function referralSectionHTML(u,o){ o=o||{}; const r=Referral.get(u.id); const li
     +'<div class="card"><h4 class="rf-h4">'+ic('activity')+'Activit\u00E9 des filleuls</h4>'
     +'<div class="rf-ringwrap"><div class="rf-ring" id="rfRing" style="--p:'+st.rate+'"><div class="in"><b id="rfRate">'+st.rate+'</b><span>% actifs</span></div></div>'
     +'<ul class="rf-legend"><li><i class="on"></i>Actifs<b>'+fmt(st.active)+'</b></li><li><i></i>Inactifs<b>'+fmt(st.inactive)+'</b></li></ul></div>'
-    +'<p class="rf-note">Un filleul est actif s\u2019il a jou\u00E9, regard\u00E9 une publicit\u00E9, relev\u00E9 un d\u00E9fi, soumis une vid\u00E9o ou s\u2019est connect\u00E9 ces '+CONFIG.REFERRAL_ACTIVE_DAYS+' derniers jours.</p></div>'
+    +'<p class="rf-note">Un filleul est actif s\u2019il a jou\u00E9, relev\u00E9 un d\u00E9fi, soumis une vid\u00E9o ou s\u2019est connect\u00E9 ces '+CONFIG.REFERRAL_ACTIVE_DAYS+' derniers jours.</p></div>'
     +'<div class="card"><h4 class="rf-h4">'+ic('trending-up')+'Inscriptions sur 6 mois</h4><div class="rf-bars">'
     +st.months.map((m,i)=>'<div class="b'+(m.count?'':' zero')+'"><span class="v">'+m.count+'</span><i style="height:'+Math.max(5,Math.round(m.count/maxM*86))+'px;--i:'+i+'"></i><span class="m">'+esc(m.label)+'</span></div>').join('')+'</div></div>'
   +'</div>'
@@ -1970,7 +1921,7 @@ function downloadQR(){ const u=Auth.currentUser(); const r=Referral.get(u.id); c
    Quand Supabase sera branché, ces fonctions deviennent des RPC
    (security definer) avec les mêmes contrôles : voir le schéma SQL.
    ================================================================ */
-const WD_DEFAULTS={ enabled:true, minFirst:1000, minNext:8000, max:10000, unlockFee:3000,
+const WD_DEFAULTS={ enabled:true, minFirst:1000, minNext:8000, unlockFee:3000,
   merchants:{ tmoney:'', flooz:'', mmoney:'' } };
 const fcfa=n=>fmt(n)+' F CFA';
 const WD_PHONE_RE=/^\+?[0-9 ]{8,15}$/;
@@ -1980,7 +1931,6 @@ const wdErr=m=>({ok:false,err:m});
 const WD_OBJ_TYPES=[
   {id:'total_earned',   label:'Crédits gagnés (cumul)',        unit:'F CFA',    get:(db,u)=>((db.wallets.find(w=>w.userId===u.id)||{}).totalEarned)||0},
   {id:'games_played',   label:'Parties jouées',                unit:'parties',  get:(db,u)=>db.game_sessions.filter(s=>s.userId===u.id).length},
-  {id:'ads_watched',    label:'Publicités visionnées',         unit:'pubs',     get:(db,u)=>db.ad_views.filter(a=>a.userId===u.id).length},
   {id:'challenges_done',label:'Défis du jour relevés',         unit:'défis',    get:(db,u)=>db.wallet_transactions.filter(t=>t.userId===u.id&&t.type==='defi'&&t.status==='confirmé').length},
   {id:'referrals_total',label:'Filleuls inscrits',             unit:'filleuls', get:(db,u)=>db.referral_relations.filter(r=>r.referrerId===u.id).length},
   {id:'referrals_active',label:'Filleuls actifs',              unit:'filleuls', get:(db,u)=>Referral.list(u.id).filter(x=>x.active).length},
@@ -2007,12 +1957,11 @@ const WD={
   cfg(){ const s=((Store.read().app_settings||{}).withdraw)||{};
     return Object.assign({},WD_DEFAULTS,s,{merchants:Object.assign({},WD_DEFAULTS.merchants,s.merchants||{})}); },
   saveCfg(p){ if(!Admin.me()) return wdErr('Accès réservé à l\u2019administrateur.');
-    const n=k=>Number(p[k]); const ints=['minFirst','minNext','max','unlockFee'];
+    const n=k=>Number(p[k]); const ints=['minFirst','minNext','unlockFee'];
     for(const k of ints){ if(!Number.isInteger(n(k))||n(k)<0) return wdErr('Les montants doivent être des nombres entiers positifs.'); }
     if(n('minFirst')<1||n('minNext')<1) return wdErr('Les montants minimums doivent être supérieurs à 0.');
-    if(n('max')<n('minFirst')||n('max')<n('minNext')) return wdErr('Le montant maximum doit être supérieur ou égal aux minimums.');
     const merchants={}; for(const k of ['tmoney','flooz','mmoney']){ const v=String(p.merchants&&p.merchants[k]||'').trim(); if(v&&!WD_PHONE_RE.test(v)) return wdErr('Numéro marchand invalide ('+k+').'); merchants[k]=v; }
-    Store.mutate(db=>{ db.app_settings=db.app_settings||{}; db.app_settings.withdraw={enabled:!!p.enabled,minFirst:n('minFirst'),minNext:n('minNext'),max:n('max'),unlockFee:n('unlockFee'),merchants}; });
+    Store.mutate(db=>{ db.app_settings=db.app_settings||{}; db.app_settings.withdraw={enabled:!!p.enabled,minFirst:n('minFirst'),minNext:n('minNext'),unlockFee:n('unlockFee'),merchants}; });
     logSecurity(Admin.me().id,'admin_parametres','Paramètres de retrait modifiés'); return {ok:true}; },
   methodName(id){ const m=CONFIG.WITHDRAW.methods.find(x=>x.id===id); return m?m.name:id; },
 
@@ -2029,11 +1978,11 @@ const WD={
   requestsOf(userId){ return (Store.read().withdrawal_requests||[]).filter(r=>r.userId===userId).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)); },
   open(userId){ return this.requestsOf(userId).find(r=>this.OPEN.includes(r.status))||null; },
   isFirst(userId){ return !this.requestsOf(userId).some(r=>this.COUNTED.includes(r.status)); },
-  limits(userId){ const c=this.cfg(), first=this.isFirst(userId); return {first,min:first?c.minFirst:c.minNext,max:c.max}; },
+  limits(userId){ const c=this.cfg(), first=this.isFirst(userId); return {first,min:first?c.minFirst:c.minNext}; },
 
   /* ----- objectifs (valeurs réelles, jamais simulées) ----- */
   objectives(userId){ const db=Store.read(); const u=db.users.find(x=>x.id===userId); if(!u) return [];
-    return (db.withdraw_objectives||[]).filter(o=>o.active!==false).sort((a,b)=>(a.order||0)-(b.order||0)).map(o=>{
+    return (db.withdraw_objectives||[]).filter(o=>o.active!==false&&wdObjType(o.type)).sort((a,b)=>(a.order||0)-(b.order||0)).map(o=>{
       const t=wdObjType(o.type); const target=t&&t.bool?1:Math.max(1,Number(o.target)||1);
       const value=t?Math.max(0,Number(t.get(db,u))||0):0; const done=value>=target; const pct=Math.min(100,Math.round(value/target*100));
       return {id:o.id,title:o.title,description:o.description,type:o.type,bool:!!(t&&t.bool),unit:t?t.unit:'',target,value,pct,done,status:done?'validé':(value>0?'en cours':'non commencé')}; }); },
@@ -2076,7 +2025,6 @@ const WD={
     const amount=Number(raw);
     if(!Number.isFinite(amount)||!Number.isInteger(amount)||amount<=0) return wdErr('Saisis un montant entier, en F CFA.');
     if(amount<lim.min) return wdErr(lim.first?'Pour ton premier retrait, le montant minimum est de '+fcfa(lim.min)+'.':'À partir du 2ᵉ retrait, le montant minimum est de '+fcfa(lim.min)+'.');
-    if(amount>lim.max) return wdErr('Le montant maximum par retrait est de '+fcfa(lim.max)+'.');
     if(amount>el.balance) return wdErr('Solde insuffisant : tu disposes de '+fcfa(el.balance)+' (il te manque '+fcfa(amount-el.balance)+').');
     return {ok:true,amount,el}; },
 
@@ -2084,7 +2032,7 @@ const WD={
   request(userId,raw){
     const v=this.validateAmount(userId,raw); if(!v.ok) return v;
     const {amount,el}=v; const now=new Date().toISOString(); const ref='WD-'+genCode(7); const id=uid();
-    const snap={first:el.first,min:el.limits.min,max:el.limits.max,balanceBefore:el.balance,
+    const snap={first:el.first,min:el.limits.min,balanceBefore:el.balance,
       unlock:el.unlock.state,objDone:el.objectives.filter(o=>o.done).length,objTotal:el.objectives.length};
     Store.mutate(db=>{ const w=db.wallets.find(x=>x.userId===userId); if(w.balance<amount) return; w.balance-=amount;
       db.withdrawal_requests=db.withdrawal_requests||[];
@@ -2185,7 +2133,6 @@ function wdHeroHTML(u,el){ const lim=el.limits, c=el.cfg, p=el.payout;
     <div class="wd-state ${el.allOk?'ok':'lock'}">${ic(el.allOk?'shield-check':'lock')}${el.allOk?'Retrait activé':'Retrait verrouillé'}</div></div>
     <div class="wd-mini">
       <div class="wd-mt"><div class="k">${ic('arrow-down-to-line')}Minimum</div><div class="v">${fcfa(lim.min)}</div><div class="h">${lim.first?'Premier retrait · puis '+fcfa(c.minNext):'À partir du 2ᵉ retrait'}</div></div>
-      <div class="wd-mt"><div class="k">${ic('arrow-up-to-line')}Maximum</div><div class="v">${fcfa(lim.max)}</div><div class="h">Par demande de retrait</div></div>
       <div class="wd-mt"><div class="k">${ic('smartphone')}Moyen de paiement</div>
         <div class="v">${p?esc(WD.methodName(p.method)):'Non enregistré'}</div><div class="h">${p?esc(p.phone):'Ajoute ton numéro de réception'}
         <button class="wd-edit" onclick="wdPayoutModal()">${ic(p?'pencil':'plus')}${p?'Modifier':'Ajouter'}</button></div></div>
@@ -2229,15 +2176,15 @@ function wdOkHTML(el){
     <button class="btn btn-white btn-lg" onclick="wdFocusForm()">${ic('banknote')}EFFECTUER UN RETRAIT</button></div>`; }
 
 /* ---------- Bloc : formulaire de retrait ---------- */
-function wdFormHTML(u,el){ const lim=el.limits, can=el.canRequest; const maxPossible=Math.min(lim.max,el.balance);
+function wdFormHTML(u,el){ const lim=el.limits, can=el.canRequest; const maxPossible=el.balance;
   const lockMsg=!can&&el.blockers.length?el.blockers[0]:'';
   return `<div class="card wd-form ${can?'':'locked'}" id="wdForm"><div class="wd-form-head"><h4>${ic('banknote')}Effectuer un retrait</h4>
     ${can?'<span class="badge b-green">'+ic('check')+'Disponible</span>':'<span class="badge b-gray">'+ic('lock')+'Verrouillé</span>'}</div>
     ${lockMsg?`<div class="info-strip wd-lockmsg">${ic(el.open?'clock':'lock')}<span>${esc(lockMsg)}</span></div>`:''}
     <div class="field"><label for="wd-amt">Montant à retirer</label>
-      <div class="amt-wrap"><input class="input" id="wd-amt" type="number" inputmode="numeric" min="${lim.min}" max="${lim.max}" step="1" placeholder="Ex. ${fmt(lim.min)}" oninput="wdLive()" ${can?'':'disabled'}><span class="suf">F CFA</span></div>
-      <div class="f-err"></div><div class="wd-hint" id="wdHint">${can?`Entre ${fcfa(lim.min)} et ${fcfa(lim.max)} · solde ${fcfa(el.balance)}`:''}</div></div>
-    ${can?`<div class="wd-quick"><button type="button" onclick="wdSet(${lim.min})">Minimum · ${fmt(lim.min)}</button>${maxPossible>lim.min?`<button type="button" onclick="wdSet(${maxPossible})">Maximum possible · ${fmt(maxPossible)}</button>`:''}</div>`:''}
+      <div class="amt-wrap"><input class="input" id="wd-amt" type="number" inputmode="numeric" min="${lim.min}" step="1" placeholder="Ex. ${fmt(lim.min)}" oninput="wdLive()" ${can?'':'disabled'}><span class="suf">F CFA</span></div>
+      <div class="f-err"></div><div class="wd-hint" id="wdHint">${can?`Minimum ${fcfa(lim.min)} · solde ${fcfa(el.balance)}`:''}</div></div>
+    ${can?`<div class="wd-quick"><button type="button" onclick="wdSet(${lim.min})">Minimum · ${fmt(lim.min)}</button>${maxPossible>lim.min?`<button type="button" onclick="wdSet(${maxPossible})">Tout mon solde · ${fmt(maxPossible)}</button>`:''}</div>`:''}
     <div class="wd-recap"><div class="kv"><span class="k">Moyen de paiement</span><span class="v">${el.payout?esc(WD.methodName(el.payout.method)):'—'}</span></div>
       <div class="kv"><span class="k">Numéro de réception</span><span class="v">${el.payout?esc(el.payout.phone):'—'}</span></div></div>
     <button class="btn btn-primary btn-lg btn-block" id="wdBtn" onclick="wdSubmit()" ${can?'':'disabled'}>${ic(can?'send':'lock')}Effectuer un retrait</button></div>`; }
@@ -2279,7 +2226,7 @@ function wdFocusForm(){ const f=$('#wdForm'); if(!f) return; const me=Auth.curre
 function wdSet(n){ const i=$('#wd-amt'); if(!i) return; i.value=n; wdLive(); i.focus({preventScroll:true}); }
 function wdLive(){ const u=Auth.currentUser(); const i=$('#wd-amt'), h=$('#wdHint'); if(!i||!h) return; const f=i.closest('.field'); f.classList.remove('err'); h.className='wd-hint';
   const el=WD.eligibility(u.id); const lim=el.limits;
-  if(i.value===''){ h.textContent='Entre '+fcfa(lim.min)+' et '+fcfa(lim.max)+' · solde '+fcfa(el.balance); return; }
+  if(i.value===''){ h.textContent='Minimum '+fcfa(lim.min)+' · solde '+fcfa(el.balance); return; }
   const v=WD.validateAmount(u.id,i.value);
   if(v.ok){ h.classList.add('ok'); h.textContent='Montant valide · il te restera '+fcfa(el.balance-v.amount)+' après ce retrait.'; }
   else { h.classList.add('bad'); h.textContent=v.err; } }
@@ -2380,7 +2327,7 @@ function adRequestsHTML(){ const all=(Store.read().withdrawal_requests||[]).slic
     <div class="adm-meta">${ic('hash')}${esc(r.ref)}<i></i>${ic('calendar')}${fmtDate(r.createdAt)} ${fmtTime(r.createdAt)}<i></i>${ic('smartphone')}${esc(WD.methodName(r.method))} · ${esc(r.phone)}</div>
     <div class="adm-checks">${adChk(s.unlock==='payé'||s.unlock==='non requis'||s.first===false,'Frais de déblocage '+(s.unlock==='non requis'?'non requis':(s.first===false?'déjà réglés':'payés')))}
       ${adChk((s.objDone||0)>=(s.objTotal||0),'Objectifs '+(s.objDone||0)+'/'+(s.objTotal||0))}
-      ${adChk(r.amount>=(s.min||0)&&r.amount<=(s.max||Infinity),(s.first?'Premier retrait':'Retrait suivant')+' · limites '+fmt(s.min||0)+'–'+fmt(s.max||0))}
+      ${adChk(r.amount>=(s.min||0),(s.first?'Premier retrait':'Retrait suivant')+' · minimum '+fmt(s.min||0))}
       ${adChk(r.amount<=(s.balanceBefore||0),'Solde avant demande : '+fcfa(s.balanceBefore||0))}</div>
     <div class="adm-foot"><span>Solde actuel : <b>${fcfa(bal)}</b></span>${r.reason?`<span class="wd-reason">${ic('message-square-warning')}${esc(r.reason)}</span>`:''}</div>
     <div class="adm-actions">${r.status==='en attente'?`<button class="btn btn-primary btn-sm" onclick="adAct('wd','${r.id}','validé')">${ic('check')}Valider</button>`:''}
@@ -2443,12 +2390,12 @@ function adSettingsHTML(){ const c=WD.cfg();
   const num=(id,l,v,h)=>`<div class="field"><label for="${id}">${l}</label><div class="amt-wrap"><input class="input" id="${id}" type="number" min="0" step="1" value="${v}"><span class="suf">F CFA</span></div><div class="f-err"></div>${h?`<div class="wd-hint">${h}</div>`:''}</div>`;
   return `<div class="card"><h4 class="rf-h4">${ic('sliders-horizontal')}Limites et frais</h4>
     <label class="check-line" style="margin:12px 0 16px"><input type="checkbox" id="cf-enabled" ${c.enabled?'checked':''}><span>Retraits activés (décocher pour suspendre toutes les demandes)</span></label>
-    <div class="grid-2">${num('cf-minFirst','Premier retrait : minimum',c.minFirst)}${num('cf-minNext','Retraits suivants : minimum',c.minNext)}${num('cf-max','Maximum par retrait',c.max)}${num('cf-unlockFee','Frais de déblocage',c.unlockFee,'Mettre 0 pour ne demander aucun frais.')}</div>
+    <div class="grid-2">${num('cf-minFirst','Premier retrait : minimum',c.minFirst)}${num('cf-minNext','Retraits suivants : minimum',c.minNext)}${num('cf-unlockFee','Frais de déblocage',c.unlockFee,'Mettre 0 pour ne demander aucun frais.')}</div>
     <h4 class="rf-h4" style="margin-top:8px">${ic('smartphone')}Numéros marchands (réception des frais)</h4>
     <div class="grid-3" style="margin-top:12px">${CONFIG.WITHDRAW.methods.map(m=>`<div class="field"><label for="cf-m-${m.id}">${m.name}</label><input class="input" id="cf-m-${m.id}" type="tel" placeholder="+228 90 00 00 00" value="${esc(c.merchants[m.id]||'')}"><div class="f-err"></div></div>`).join('')}</div>
     <button class="btn btn-primary" onclick="adSaveCfg()">${ic('check')}Enregistrer les paramètres</button></div>`; }
 function adSaveCfg(){ clearErrs(); const m={}; CONFIG.WITHDRAW.methods.forEach(x=>{ m[x.id]=$('#cf-m-'+x.id).value; });
-  const r=WD.saveCfg({enabled:$('#cf-enabled').checked,minFirst:$('#cf-minFirst').value,minNext:$('#cf-minNext').value,max:$('#cf-max').value,unlockFee:$('#cf-unlockFee').value,merchants:m});
+  const r=WD.saveCfg({enabled:$('#cf-enabled').checked,minFirst:$('#cf-minFirst').value,minNext:$('#cf-minNext').value,unlockFee:$('#cf-unlockFee').value,merchants:m});
   if(!r.ok){ toast(esc(r.err),'err','alert-triangle'); return; } toast('Paramètres enregistrés','ok','check-circle-2'); adRefresh(); }
 
 /* --- Historique des transactions --- */
@@ -2456,7 +2403,7 @@ function adHistoryHTML(){ const db=Store.read();
   const tx=db.wallet_transactions.map(t=>({d:t.date,u:t.userId,t:t.type,l:t.label,a:t.amount,s:t.status,r:t.ref}));
   const fr=(db.unlock_payments||[]).map(p=>({d:p.createdAt,u:p.userId,t:'frais',l:'Frais de déblocage',a:p.amount,s:p.status,r:p.txRef}));
   let l=tx.concat(fr).sort((a,b)=>new Date(b.d)-new Date(a.d)); if(_ad.hf!=='all') l=l.filter(x=>x.t===_ad.hf);
-  return adChips([['all','Toutes'],['retrait','Retraits'],['frais','Frais de déblocage'],['jeu','Jeux'],['pub','Publicités'],['parrainage','Parrainage'],['defi','Défis'],['creator','Creator']],_ad.hf,'adSetHf')
+  return adChips([['all','Toutes'],['retrait','Retraits'],['frais','Frais de déblocage'],['jeu','Jeux'],['parrainage','Parrainage'],['defi','Défis'],['creator','Creator']],_ad.hf,'adSetHf')
   +`<div class="card">${l.length?l.slice(0,120).map(x=>{ const u=adUser(x.u); const ic2=TX_ICON[x.t]||(x.t==='frais'?['lock-open','#EAF1FF','#1769FF']:['info','#EEF2F8','#667085']); const neg=x.t==='retrait';
     return `<div class="list-row"><div class="lr-ico" style="background:${ic2[1]};color:${ic2[2]}">${ic(ic2[0])}</div><div class="lr-main"><div class="t">${esc(x.l)}</div>
       <div class="s">${esc(u.prenom)} ${esc(u.nom)} (@${esc(u.pseudo)}) · ${fmtDate(x.d)} ${fmtTime(x.d)} · ${esc(x.r)}</div></div>
@@ -2488,7 +2435,7 @@ render(u){ const w=Wallet.get(u.id); const hide=localStorage.getItem('me_hide')=
   +referralSectionHTML(u,{head:true})
   +'<div class="sec-head"><h2>'+ic('history')+'Historique des transactions</h2></div>'
   +'<div class="card"><div class="chips" style="margin-bottom:12px" id="txChips">'
-  +[['all','Tous'],['jeu','Jeux'],['pub','Publicités'],['defi','Défis'],['parrainage','Parrainage'],['creator','Creator'],['retrait','Retraits']].map((c,i)=>'<button class="chip'+(i===0?' active':'')+'" data-c="'+c[0]+'">'+c[1]+'</button>').join('')+'</div>'
+  +[['all','Tous'],['jeu','Jeux'],['defi','Défis'],['parrainage','Parrainage'],['creator','Creator'],['retrait','Retraits']].map((c,i)=>'<button class="chip'+(i===0?' active':'')+'" data-c="'+c[0]+'">'+c[1]+'</button>').join('')+'</div>'
   +'<div class="list" id="txList">'+(txs.length?txs.map(txRow).join(''):emptyState('inbox','Aucune transaction','Tes opérations apparaîtront ici dès ta première activité.'))+'</div></div>'
   +'<div class="card wd-cta"><div class="wd-cta-ico">'+ic('banknote')+'</div><div class="wd-cta-txt"><h4>Retirer mes gains</h4><p>Consulte tes conditions et tes objectifs, puis fais ta demande de retrait.</p></div><button class="btn btn-primary" onclick="go(\'withdraw\')">'+ic('arrow-right')+'Accéder au retrait</button></div>'; },
 mount(){ const u=Auth.currentUser(); mountReferralSection(u); const days=Wallet.weekEarnings(u.id);
@@ -2508,7 +2455,7 @@ render(u){ const r=Referral.get(u.id); const link=Referral.link(u.id); const ste
     {t:'Inviter 4 amis',s:'Partage ton lien personnel à tes proches.',cur:Math.min(r.invited,4),max:4},
     {t:'Inscriptions confirmées via ton lien',s:'Tes filleuls doivent finaliser leur inscription.',cur:Math.min(r.confirmed,3),max:3},
     {t:'Compléter 5 étapes de validation',s:'Profil complet et compte sécurisé.',cur:steps.filter(x=>x.ok).length,max:5},
-    {t:'Participer aux activités éligibles',s:'Jeux, publicités et défis.',cur:Math.min(db.game_sessions.filter(x=>x.userId===u.id).length+db.ad_views.filter(x=>x.userId===u.id).length,10),max:10},
+    {t:'Participer aux activités éligibles',s:'Jeux et défis.',cur:Math.min(db.game_sessions.filter(x=>x.userId===u.id).length,10),max:10},
     {t:'Atteindre 8 000 crédits',s:'Cumul des crédits confirmés gagnés.',cur:Math.min(w.totalEarned,8000),max:8000} ];
   const rewTxs=Wallet.txs(u.id).filter(t=>t.type==='parrainage');
   return '<div class="card" style="background:linear-gradient(120deg,#10264B,#1769FF 70%,#00B8FF);color:#fff;border:none;position:relative;overflow:hidden">'
@@ -2691,16 +2638,15 @@ async function changePwd(){ clearErrs(); const o=$('#pw-old').value,a=$('#pw-1')
   catch(err){ toast(err.message,'err','alert-triangle'); }
   loadBtn('#pwBtn',false); }
 function openLegal(kind){ const C={
-  cgu:{t:'Conditions d\u2019utilisation',b:'<div style="font-size:13.5px;color:#44546B;line-height:1.9"><p><b>1. Objet.</b> MONELYX est une application de divertissement proposant des mini-jeux, des publicités récompensées, un programme de parrainage et un espace Creator, avec un portefeuille de crédits numériques.</p><p><b>2. Crédits.</b> Les crédits sont des récompenses numériques sans valeur monétaire garantie. L\u2019équivalence 1 crédit = 1 FCFA est indicative. Tant que les services de paiement ne sont pas officiellement activés, les crédits ne sont pas présentés comme de l\u2019argent retirable.</p><p><b>3. Jeux.</b> Les jeux sont des jeux d\u2019adresse, de mémoire ou de réflexion. Aucune mise, aucun dépôt, aucun pari n\u2019est requis ou autorisé.</p><p><b>4. Comportement.</b> Les faux comptes, auto-parrainages, fraudes et tentatives de manipulation des récompenses entraînent la suspension du compte.</p><p><b>5. Évolution.</b> Les fonctionnalités, barèmes et conditions peuvent évoluer ; les utilisateurs sont informés des changements significatifs.</p></div>'},
+  cgu:{t:'Conditions d\u2019utilisation',b:'<div style="font-size:13.5px;color:#44546B;line-height:1.9"><p><b>1. Objet.</b> MONELYX est une application de divertissement proposant des mini-jeux, un programme de parrainage et un espace Creator, avec un portefeuille de crédits numériques.</p><p><b>2. Crédits.</b> Les crédits sont des récompenses numériques sans valeur monétaire garantie. L\u2019équivalence 1 crédit = 1 FCFA est indicative. Tant que les services de paiement ne sont pas officiellement activés, les crédits ne sont pas présentés comme de l\u2019argent retirable.</p><p><b>3. Jeux.</b> Les jeux sont des jeux d\u2019adresse, de mémoire ou de réflexion. Aucune mise, aucun dépôt, aucun pari n\u2019est requis ou autorisé.</p><p><b>4. Comportement.</b> Les faux comptes, auto-parrainages, fraudes et tentatives de manipulation des récompenses entraînent la suspension du compte.</p><p><b>5. Évolution.</b> Les fonctionnalités, barèmes et conditions peuvent évoluer ; les utilisateurs sont informés des changements significatifs.</p></div>'},
   priv:{t:'Politique de confidentialité',b:'<div style="font-size:13.5px;color:#44546B;line-height:1.9"><p><b>Données collectées :</b> identité, coordonnées, données de jeu et de progression, historique de portefeuille.</p><p><b>Finalités :</b> fonctionnement du service, sécurité, lutte contre la fraude, amélioration de l\u2019expérience.</p><p><b>Protection :</b> mots de passe hachés, accès contrôlés par utilisateur (Row Level Security), journalisation des opérations sensibles, aucune exposition de clés secrètes côté client.</p><p><b>Droits :</b> tu peux demander l\u2019accès, la rectification ou la suppression de tes données via le centre d\u2019assistance.</p></div>'},
   faq:{t:'Questions fréquentes',b:'<details class="faq"><summary>Les crédits sont-ils de l\u2019argent ?</summary><div class="a">Non. Ce sont des récompenses numériques. L\u2019équivalence 1 crédit = 1 FCFA est indicative. La conversion en paiement réel ne sera possible qu\u2019après activation officielle des prestataires de paiement.</div></details>'
     +'<details class="faq"><summary>Faut-il payer pour jouer ?</summary><div class="a">Jamais. Tous les jeux sont accessibles gratuitement, sans mise, dépôt ni pari. Les seuls frais éventuels concernent le déblocage du retrait (voir « Comment retirer mes gains ? »).</div></details>'
-    +'<details class="faq"><summary>Pourquoi ma récompense publicitaire est-elle « en attente » ?</summary><div class="a">Chaque récompense doit être confirmée par le fournisseur publicitaire. Tant que cette confirmation n\u2019est pas reçue, les crédits restent en attente et ne sont pas comptés comme confirmés.</div></details>'
     +'<details class="faq"><summary>Comment fonctionne le parrainage ?</summary><div class="a">Tu partages ton lien personnel. Les récompenses ne sont attribuées qu\u2019après inscription réelle, confirmation et vérification du compte de ton filleul — jamais sur un simple clic.</div></details>'
-    +'<details class="faq"><summary>Comment retirer mes gains ?</summary><div class="a">Depuis la page « Retrait » : règle une seule fois les frais de déblocage ('+fcfa(WD.cfg().unlockFee)+'), valide tes objectifs, puis fais ta demande. Minimum '+fcfa(WD.cfg().minFirst)+' pour le premier retrait, '+fcfa(WD.cfg().minNext)+' ensuite, maximum '+fcfa(WD.cfg().max)+' par demande. Chaque demande est vérifiée avant paiement.</div></details>'
+    +'<details class="faq"><summary>Comment retirer mes gains ?</summary><div class="a">Depuis la page « Retrait » : règle une seule fois les frais de déblocage ('+fcfa(WD.cfg().unlockFee)+'), valide tes objectifs, puis fais ta demande. Minimum '+fcfa(WD.cfg().minFirst)+' pour le premier retrait, '+fcfa(WD.cfg().minNext)+' ensuite. Chaque demande est vérifiée avant paiement.</div></details>'
     },
   about:{t:'À propos de MONELYX',b:'<div style="text-align:center;margin-bottom:14px"><div class="tb-logo floaty" style="width:56px;height:56px;border-radius:18px;margin:0 auto">'+logoImg()+'</div><h3 style="margin-top:10px">MONELYX</h3><p style="color:var(--gray);font-size:13px">Version client 1.0 · 2026</p></div>'
-    +'<div style="font-size:13.5px;color:#44546B;line-height:1.9"><p>MONELYX est une plateforme de divertissement pensée pour l\u2019Afrique francophone, avec une première orientation vers le Togo. Jeux d\u2019adresse, publicités récompensées, parrainage et création de contenu : chaque action contribue à construire ton Empire.</p><p style="margin-top:8px"><b>Référence :</b> 1 crédit = 1 FCFA (équivalence indicative). Les récompenses convertibles et paiements réels seront activés après vérification des exigences légales, des opérateurs et des conditions d\u2019âge applicables.</p></div>'} };
+    +'<div style="font-size:13.5px;color:#44546B;line-height:1.9"><p>MONELYX est une plateforme de divertissement pensée pour l\u2019Afrique francophone, avec une première orientation vers le Togo. Jeux d\u2019adresse, parrainage et création de contenu : chaque action contribue à construire ton Empire.</p><p style="margin-top:8px"><b>Référence :</b> 1 crédit = 1 FCFA (équivalence indicative). Les récompenses convertibles et paiements réels seront activés après vérification des exigences légales, des opérateurs et des conditions d\u2019âge applicables.</p></div>'} };
   const c=C[kind]; openModal({title:c.t,wide:kind==='faq'||kind==='cgu'||kind==='priv',body:c.b,actions:'<button class="btn btn-primary" onclick="closeModal()">Fermer</button>'}); }
 function openHelp(){ openModal({title:'Centre d\u2019assistance',
   body:'<p style="font-size:13px;color:var(--gray);margin-bottom:14px">Décris ton problème : notre équipe te répondra. Tu peux aussi consulter la FAQ.</p>'
